@@ -9,9 +9,22 @@ app.use(express.json());
 
 
 // ✅ WhatsApp Webhook Handler
-const processedMessages = new Set(); // 🧠 track processed message IDs
+const processedMessages = new Set(); // Track processed message IDs
+const userSessions = {}; // Store sessionId by phone number
+const sessionTimeouts = {}; // Handle user inactivity timers
 
-const userSessions = {}; // 🧠 Store sessionId by phone number
+// 🕒 Session timeout logic
+function resetSessionTimeout(userId) {
+  if (sessionTimeouts[userId]) clearTimeout(sessionTimeouts[userId]);
+  sessionTimeouts[userId] = setTimeout(async () => {
+    console.log(`⏰ Session expired for ${userId}`);
+
+    await sendTextMessage(userId,"⏰ Your session has expired due to inactivity.\n\nPlease send any message to start a new session 😊");
+    
+    delete userSessions[userId];
+    delete sessionTimeouts[userId];
+  }, 2 * 60 * 1000);
+}
 
 //Reuse Tokens from .env
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
@@ -55,7 +68,7 @@ app.post("/webhook", async (req, res) => {
   try {
     if (msg.type === "text") {
       const text = msg.text.body.trim().toLowerCase();
-        await sessionResponseAPI(from,text);
+      await sessionResponseAPI(from, text, msgId);
     }
 
   } catch (err) {
@@ -63,11 +76,14 @@ app.post("/webhook", async (req, res) => {
     await sendFallbackMessage(from);
   }
 
-  res.sendStatus(200);
 });
 
-async function sessionResponseAPI(to, query) {
+async function sessionResponseAPI(to, query, msgId) {
   try {
+    resetSessionTimeout(to);
+     // 🟡 Start typing indicator
+    await sendTypingIndicator(to, msgId, true);
+
     const formData = new FormData();
     formData.append("query", query);
 
@@ -91,6 +107,9 @@ async function sessionResponseAPI(to, query) {
         },
       }
     );
+
+    // 🟢 Stop typing indicator
+    await sendTypingIndicator(to, msgId, false);
 
     console.log("🤖 Agent API success:", agentRes.data);
 
@@ -132,16 +151,19 @@ async function sessionResponseAPI(to, query) {
       console.log(`💾 Saved new session for ${to}: ${sessionId}`);
     }
 
+    responseText = `${responseText}\n\n\n\nType *1* anytime - return to *main menu*.`;
+
     // 📨 Always send only the "response" part to WhatsApp
     await sendTextMessage(to, responseText);
 
     // 🚀 If the query was extracted from AI JSON, call next API
     if (userQuery && userQuery !== query) {
       console.log(`🚀 Forwarding extracted query to callAgentAPI: ${userQuery}`);
-      await callAgentAPI(to, userQuery);
+      await callAgentAPI(to, userQuery, msgId);
     }
 
   } catch (err) {
+    await sendTypingIndicator(to, msgId, false);
     console.error("❌ Agent API error:", err.response?.data || err.message);
     await sendTextMessage(
       to,
@@ -150,9 +172,36 @@ async function sessionResponseAPI(to, query) {
   }
 }
 
-
-async function callAgentAPI(to, query) {
+async function sendTypingIndicator(to, messageId, isTyping) {
   try {
+    console.log(`💬 Typing indicator ${isTyping ? "on" : "off"} for ${to}`);
+
+    await axios.post(
+      `https://graph.facebook.com/v24.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        status: "read", // ✅ Required
+        message_id: messageId, // ✅ Required from webhook
+        typing_indicator: isTyping ? { type: "text" } : undefined, // typing off happens automatically when you send the message
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+  } catch (err) {
+    console.warn("⚠️ Typing indicator error:", err.response?.data || err.message);
+  }
+}
+
+
+async function callAgentAPI(to, query, msgId) {
+  try {
+    // 🟡 Start typing indicator
+    await sendTypingIndicator(to, msgId, true);
+
     const formData = new FormData();
     formData.append("query", query);
 
@@ -168,6 +217,9 @@ async function callAgentAPI(to, query) {
         },
       }
     );
+
+     // 🟢 Stop typing indicator
+    await sendTypingIndicator(to, msgId, false);
 
     const aiResult = agentRes?.data?.workflowlog?.tasks?.find(
       (t) => t.tool === "generate-image(1)"
@@ -206,6 +258,7 @@ async function callAgentAPI(to, query) {
   }
 }
   } catch (err) {
+    await sendTypingIndicator(to, msgId, false);
     console.error("❌ Agent API error:", err.response?.data || err.message);
     await sendTextMessage(
       to,

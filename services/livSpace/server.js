@@ -16,13 +16,21 @@ const sessionTimeouts = {}; // Handle user inactivity timers
 function resetSessionTimeout(userId) {
   if (sessionTimeouts[userId]) clearTimeout(sessionTimeouts[userId]);
   sessionTimeouts[userId] = setTimeout(async () => {
-    console.log(`⏰ Session expired for ${userId}`);
+  console.log(`⏰ Session expired for ${userId}`);
 
-    await sendTextMessage(userId,"⏰ Your session has expired due to inactivity.\n\nPlease send any message to start a new session 😊");
-    
-    delete userSessions[userId];
-    delete sessionTimeouts[userId];
-  }, 2 * 60 * 1000);
+  // await sendTextMessage(userId,"⏰ Your session has expired due to inactivity.\n\nPlease send any message to start a new session 😊");
+
+  delete userSessions[userId];
+  delete sessionTimeouts[userId];
+
+  // 🔔 Notify Gateway
+  try {
+    await axios.post("http://localhost:7000/session-expired", { user: userId });
+  } catch (err) {
+    console.error("⚠️ Failed to notify gateway about session expiration:", err.message);
+  }
+}, 2 * 60 * 1000);
+
 }
 
 // 🔐 Environment variables
@@ -33,7 +41,7 @@ const AUTHORIZE_TOKEN = process.env.AUTHORIZE_TOKEN;
 
 
 // ✅ Webhook Receiver
-app.post("/process", async (req, res) => {
+app.post("/webhook", async (req, res) => {
   const msg = req.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
   const from = msg?.from;
   const msgId = msg?.id;
@@ -82,6 +90,37 @@ app.post("/process", async (req, res) => {
       );
 
       await sessionResponseAPI(from, JSON.stringify(locationPayload), msgId);
+    }
+
+     // 🖼️ IMAGE MESSAGE
+    else if (msg.type === "image") {
+      const imageData = msg.image;
+      const caption = imageData?.caption || "(no caption)";
+      const imageId = imageData?.id;
+
+      console.log(`🖼️ Received image from ${from}`);
+      console.log(`📄 Caption: ${caption}`);
+      console.log(`🪪 Media ID: ${imageId}`);
+
+      // Step 1️⃣: Get image URL
+      const imageUrl = await getMediaUrl(imageId);
+      console.log("✅ Fetched image URL:", imageUrl);
+
+      // Step 2️⃣: Download image buffer
+      const { buffer, mimeType, fileExt } = await downloadMediaBuffer(imageUrl);
+      console.log("📥 Downloaded image buffer:", buffer.length, "bytes");
+
+      // Step 3️⃣: Upload image to external API
+      const uploadedUrls = await uploadToExternalAPI(
+        buffer,
+        `${imageId}.${fileExt}`,
+        mimeType
+      );
+      console.log("🌐 Uploaded URLs:", uploadedUrls);
+
+      await sessionResponseAPI(from, uploadedUrls?.[0],msgId);
+
+      // await sendTextMessage(from, `✅ Image uploaded successfully!\n${uploadedUrls?.[0] || ""}`);
     }
   } catch (err) {
     console.error("❌ Error:", err.response?.data || err.message);
@@ -147,21 +186,26 @@ async function sessionResponseAPI(to, query, msgId) {
     .trim();
 }
 
+
+
   if (responseText.startsWith("{")) {
       try {
         const parsed = JSON.parse(responseText);
 
-        if (parsed.response && parsed.Support) {
-          console.log("📞 Detected 'Support' response (CTA URL)");
-          return sendCTAButtonMessage(
-            to,
-            parsed.response,
-            "Contact Support",
-            `mailto:${parsed.Support}`, // or any desired link
-            "https://upload.wikimedia.org/wikipedia/commons/9/93/Livspace_logo.png", // optional header image
-            "Livspace Support Team"
-          );
-        }
+         // 🔹 Common footer to append to every message type
+        const footerText = "\n\nType *1* anytime - return to *main menu*.";
+
+        // if (parsed.response && parsed.Support) {
+        //   console.log("📞 Detected 'Support' response (CTA URL)");
+        //   return sendCTAButtonMessage(
+        //     to,
+        //     parsed.response,
+        //     "Contact Support",
+        //     `mailto:${parsed.Support}`, // or any desired link
+        //     "https://upload.wikimedia.org/wikipedia/commons/9/93/Livspace_logo.png", // optional header image
+        //     "Livspace Support Team"
+        //   );
+        // }
 
         // ✅ Case 1: Buttons
         if (parsed.response && Array.isArray(parsed.buttons)) {
@@ -170,7 +214,7 @@ async function sessionResponseAPI(to, query, msgId) {
             id: `btn_${idx + 1}`,
             title: b,
           }));
-          return sendButtonMessage(to, parsed.response, options);
+          return sendButtonMessage(to,  `${parsed.response}${footerText}`, options);
         }
 
         // ✅ Case 2: Quick Replies (send as List Message)
@@ -180,24 +224,32 @@ async function sessionResponseAPI(to, query, msgId) {
             id: `qr_${idx + 1}`,
             title: b,
           }));
-          return sendListMessage(to, parsed.response, options);
+          return sendListMessage(to, `${parsed.response}${footerText}`, options);
         }
 
         // ✅ Case 3: Location Request
         if (parsed.response && parsed.location_request === true) {
           console.log("📍 Detected 'location_request' response");
-          return sendLocationRequestMessage(to, parsed.response);
+          return sendLocationRequestMessage(to, `${parsed.response}${footerText}`);
         }
 
-        // ✅ Case 4: Plain text fallback
+        // ✅ Case 4: Image Message
+        if (parsed.response && parsed.image) {
+          console.log("🖼️ Detected 'image' response");
+          return sendTextMessage(to, parsed.response);
+        }
+
+        // ✅ Case 5: Plain text fallback
         if (parsed.response && !parsed.buttons && !parsed.quick_replies && !parsed.location_request) {
           console.log("💬 Detected plain text response");
-          return sendTextMessage(to, parsed.response);
+          return sendTextMessage(to, `${parsed.response}${footerText}`);
         }
       } catch (err) {
         console.log("⚠️ Not valid JSON, sending plain text...");
       }
     }
+
+    responseText = `${responseText}\n\n\n\nType *1* anytime - return to *main menu*.`;
 
     // 🧠 Otherwise handle normal messages
     await sendTextMessage(to, responseText);
@@ -272,7 +324,7 @@ async function sendButtonMessage(to, text, options) {
       type: "interactive",
       interactive: {
         type: "button",
-        body: { text: formatWithEmoji(text) },
+        body: { text: text },
         action: {
           buttons: options.map(opt => ({
             type: "reply",
@@ -301,7 +353,7 @@ async function sendListMessage(to, text, options) {
       interactive: {
         type: "list",
         header: { type: "text", text: "Please choose an option" },
-        body: { text: formatWithEmoji(text) },
+        body: { text: text },
         footer: { text: "Livspace Assistant" },
         action: {
           button: "Select Option",
@@ -363,6 +415,46 @@ async function sendCTAButtonMessage(to, bodyText, buttonLabel, buttonUrl, header
   );
 }
 
+// 🔹 Get media URL from media ID
+async function getMediaUrl(mediaId) {
+  const res = await axios.get(`https://graph.facebook.com/v21.0/${mediaId}`, {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+  });
+  return res.data.url;
+}
+
+// 🔹 Download media buffer from media URL
+async function downloadMediaBuffer(mediaUrl) {
+  const res = await axios.get(mediaUrl, {
+    responseType: "arraybuffer",
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+  });
+
+  const buffer = Buffer.from(res.data, "binary");
+  let mimeType = res.headers["content-type"];
+  if (!mimeType || mimeType === "binary/octet-stream") {
+    mimeType = mime.lookup(mediaUrl) || "application/octet-stream";
+  }
+  const fileExt = mime.extension(mimeType) || "bin";
+
+  return { buffer, mimeType, fileExt };
+}
+
+// 🔹 Upload to external API and get URLs
+async function uploadToExternalAPI(buffer, filename, mimeType) {
+  const formData = new FormData();
+  formData.append("files", buffer, { filename, contentType: mimeType });
+
+  const res = await axios.post(
+    "https://api.gettaskagent.com/api/file/upload",
+    formData,
+    { headers: { ...formData.getHeaders() } }
+  );
+
+  const uploadedUrls = res.data?.files?.map((f) => f.Location);
+  return uploadedUrls;
+}
+
 // ✅ Text message fallback
 async function sendTextMessage(to, message) {
   return axios.post(
@@ -381,13 +473,6 @@ async function sendTextMessage(to, message) {
   );
 }
 
-// ✨ Emoji formatter
-function formatWithEmoji(text) {
-  if (/let's continue/i.test(text)) {
-    return text.replace(/let's continue/gi, "👉 Let’s continue ✨");
-  }
-  return text;
-}
 
 app.listen(process.env.PORT || 3000, () => {
   console.log(`✅ WhatsApp RAG bot running on port ${process.env.PORT || 3000}`);

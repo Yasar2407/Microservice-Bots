@@ -52,7 +52,7 @@ app.post("/webhook", async (req, res) => {
       if (text === "hi") {
         await sendTextMessage(
           from,
-          "👋 Hi! I’m *AI Home Designer*.\nPlease enter your Bathroom size in this format: _Length*Breadth_ (e.g., 10*12)."
+          "👋 Hi! I’m *AI Bathroom Designer*.\nPlease enter your Bathroom size in this format: _Length*Breadth_ (e.g., 10*12).\n\n\n\nType *1* anytime - return to *main menu*."
         );
       } else if (/^\d+(\s*[\*x, ]\s*)?\d+$/.test(text)) {
         // ✅ Valid dimension format
@@ -71,62 +71,13 @@ app.post("/webhook", async (req, res) => {
       const id =
         msg?.interactive?.button_reply?.id ||
         msg?.interactive?.list_reply?.id;
-      await handleInteractiveReply(from, id);
+      await handleInteractiveReply(from, id,msgId);
     }
-
-    // ✅ Image handling
-    // else if (msg.type === "image") {
-    //   const imageData = msg.image;
-    //   const caption = imageData?.caption || "(no caption)";
-    //   const imageId = imageData?.id;
-
-    //   console.log("🖼️ Image received:", { caption, imageId });
-
-    //   // Step 1: Get temporary image URL from WhatsApp
-    //   const mediaResponse = await axios.get(
-    //     `https://graph.facebook.com/v21.0/${imageId}`,
-    //     {
-    //       headers: { Authorization: `Bearer ${process.env.ACCESS_TOKEN}` },
-    //     }
-    //   );
-    //   const imageUrl = mediaResponse.data.url;
-
-    //   // Step 2: Download image
-    //   const imageResponse = await axios.get(imageUrl, {
-    //     responseType: "arraybuffer",
-    //     headers: { Authorization: `Bearer ${process.env.ACCESS_TOKEN}` },
-    //   });
-
-    //   const mimeType =
-    //     imageResponse.headers["content-type"] || "image/jpeg";
-    //   const fileExt = mime.extension(mimeType) || "jpg";
-    //   const imageBuffer = Buffer.from(imageResponse.data, "binary");
-
-    //   // Step 3: Upload image to external storage
-    //   const formData = new FormData();
-    //   formData.append("files", imageBuffer, {
-    //     filename: `${imageId}.${fileExt}`,
-    //     contentType: mimeType,
-    //   });
-
-    //   const uploadResponse = await axios.post(
-    //     "https://api.gettaskagent.com/api/file/upload",
-    //     formData,
-    //     { headers: formData.getHeaders() }
-    //   );
-
-    //   const uploadedUrls = uploadResponse.data?.files?.map(
-    //     (f) => f.Location
-    //   );
-
-    //   await sendImageReply(from, uploadedUrls, caption, imageId);
-    // }
   } catch (err) {
     console.error("❌ Error:", err.response?.data || err.message);
     await sendFallbackMessage(from);
   }
 
-  res.sendStatus(200);
 });
 
 
@@ -141,7 +92,7 @@ async function sendProductSelectionButtons(to) {
       interactive: {
         type: "button",
         body: { text: "Please select your preferred product 👇" },
-        footer: { text: "AI Home Designer • Smart Interiors 🧠" },
+        footer: { text: "AISmart Interiors 🧠 | Type *1* anytime - return to *main menu*." },
         action: {
           buttons: [
             { type: "reply", reply: { id: "sgg", title: "SGG Aspira Dawn" } },
@@ -211,51 +162,36 @@ async function uploadImageToWhatsApp(imageUrl) {
 
 // 🔹 Send interactive design reply with buttons
 async function sendInteractiveDesignReply(to, mediaId, query) {
-  await axios.post(
-    `https://graph.facebook.com/v21.0/${process.env.PHONE_NUMBER_ID}/messages`,
-    {
-      messaging_product: "whatsapp",
-      to,
-      type: "interactive",
-      interactive: {
-        type: "button",
-        header: {
-          type: "image",
-          image: { id: mediaId },
-        },
-        body: {
-          text: `${query}\n\n🎨 Here’s your AI-generated design preview!`,
-        },
-        footer: {
-          text: "AI Home Designer • Smart Interiors 🧠",
-        },
-        action: {
-          buttons: [
-            // {
-            //   type: "reply",
-            //   reply: { id: "exact_match", title: "✅ Exact Match" },
-            // },
-            {
-              type: "reply",
-              reply: { id: "relevant_product", title: "🔍 Relevant Product" },
-            },
-          ],
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v21.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "image",
+        image: {
+          id: mediaId, // ✅ Already uploaded image to WhatsApp
+          caption: `${query}\n\n🎨 Here’s your AI-generated design preview!`,
         },
       },
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
 
-  console.log("✅ Sent interactive AI design message with buttons.");
+    console.log("✅ Sent AI design image with caption successfully.");
+  } catch (err) {
+    console.error("❌ sendInteractiveDesignReply error:", err.response?.data || err.message);
+    throw err;
+  }
 }
 
 // 🔹 Handle interactive reply (button click)
-async function handleInteractiveReply(to, id) {
+async function handleInteractiveReply(to, id,msgId) {
  const productMap = {
     sgg: {
       name: "SGG Aspira Dawn",
@@ -289,7 +225,7 @@ async function handleInteractiveReply(to, id) {
           const mediaId = await uploadImageToWhatsApp(selectedProduct.imageUrl); 
 
         // ✅ Send the uploaded image via WhatsApp message
-      await sendWhatsAppMessage(to, mediaId, `✅ Successfully selected *${selectedProduct.name}*. Please wait while we process your design..`);
+      await sendWhatsAppMessage(to, mediaId, `✅ Great choice! *${selectedProduct.name}* is being processed — this may take a moment... `);
     // await sendTextMessage(
     //   to,
     //   `✅ Successfully selected *${selectedProduct..name}*. Please wait while we process your design...`
@@ -298,6 +234,9 @@ async function handleInteractiveReply(to, id) {
     // Prepare and send API payload
     const dims = userDimensions[to] || { length: "N/A", breadth: "N/A" };
     const query = `Bathroom length: ${dims.length} feet and inches, width: ${dims.breadth} feet and inches. Selected product: ${selectedProduct.name}`;
+
+     // 🟡 Start typing indicator
+      await sendTypingIndicator(to, msgId, true);
 
     const formData = new FormData();
     formData.append("query", query);
@@ -316,9 +255,10 @@ async function handleInteractiveReply(to, id) {
         }
       );
 
-      console.log("🤖 Agent API success:", agentResponse.data);
+          // 🟢 Stop typing indicator
+    await sendTypingIndicator(to, msgId, false);
 
-       console.log("🤖 Agent API response:", agentResponse.data);
+      console.log("🤖 Agent API success:", agentResponse.data);
 
       const aiResult = agentResponse?.data?.workflowlog?.tasks?.find(
         (task) => task.tool === "multi-image-upload-and-generate"
@@ -387,6 +327,31 @@ async function sendWhatsAppMessage(to, mediaId, caption) {
       },
     }
   );
+}
+
+// ✅ Typing Indicator Sender
+async function sendTypingIndicator(to, messageId, isTyping) {
+  try {
+    console.log(`💬 Typing indicator ${isTyping ? "on" : "off"} for ${to}`);
+
+    await axios.post(
+      `https://graph.facebook.com/v24.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        status: "read", // ✅ Required
+        message_id: messageId, // ✅ Required from webhook
+        typing_indicator: isTyping ? { type: "text" } : undefined, // typing off happens automatically when you send the message
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+  } catch (err) {
+    console.warn("⚠️ Typing indicator error:", err.response?.data || err.message);
+  }
 }
 
 // 🔹 Fallback for unknown messages

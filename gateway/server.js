@@ -151,7 +151,7 @@ app.post("/webhook", async (req, res) => {
       const targetService = MICROSERVICES[selected];
       try {
         // await axios.post(`http://localhost:${targetService.port}/webhook`, {
-        await axios.post(`${targetService.url}/webhook`, {
+        await axios.post(targetService.url, {
 
           entry: [
             {

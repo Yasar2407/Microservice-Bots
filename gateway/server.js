@@ -298,6 +298,11 @@ app.post("/session-expired", async (req, res) => {
   res.sendStatus(200);
 });
 
+// ✅ Basic root endpoint
+app.get('/', (req, res)=>{
+    res.send("Welcome to BuilderPluss WhatsApp Gateway!")
+})
+
 // ✅ Start server
 const PORT = process.env.PORT || 7000;
 app.listen(PORT, () => console.log(`✅ Gateway running on port ${PORT}`));

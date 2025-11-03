@@ -26,7 +26,9 @@ function resetSessionTimeout(userId) {
 
   // 🔔 Notify Gateway
   try {
-    await axios.post("http://localhost:7000/session-expired", { user: userId });
+    // await axios.post("http://localhost:7000/session-expired", { user: userId });
+    await axios.post("https://whatsapp-gateway-k2lk.onrender.com/session-expired", { user: userId });
+
   } catch (err) {
     console.error("⚠️ Failed to notify gateway about session expiration:", err.message);
   }

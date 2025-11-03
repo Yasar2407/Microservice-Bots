@@ -13,12 +13,20 @@ const userSessions = {};
 const sessionTimeouts = {};
 
 // ✅ Microservice configuration
+// const MICROSERVICES = {
+//   bath: { port: 7001 },
+//   livspace: { port: 7002 },
+//   ai: { port: 7003 },
+//   "proposal-estimator": { port: 7004 },
+// };
+
 const MICROSERVICES = {
-  bath: { port: 7001 },
-  livspace: { port: 7002 },
-  ai: { port: 7003 },
-  "proposal-estimator": { port: 7004 },
+  bath: { url: "https://bath-measure-k2lk.onrender.com/webhook" },
+  livspace: { url: "https://livspace-k2lk.onrender.com/webhook" },
+  ai: { url: "https://ai-session-k2lk.onrender.com/webhook" },
+  "proposal-estimator": { url: "https://proposal-estimator-k2lk.onrender.com/webhook" },
 };
+
 
 // 🕒 Auto-prune processed messages to prevent memory leaks
 const CLEAN_INTERVAL_MS = 30 * 60 * 1000;
@@ -142,7 +150,9 @@ app.post("/webhook", async (req, res) => {
 
       const targetService = MICROSERVICES[selected];
       try {
-        await axios.post(`http://localhost:${targetService.port}/webhook`, {
+        // await axios.post(`http://localhost:${targetService.port}/webhook`, {
+        await axios.post(`${targetService.url}/webhook`, {
+
           entry: [
             {
               changes: [
@@ -185,7 +195,8 @@ app.post("/webhook", async (req, res) => {
     console.log(`➡️ Forwarding message from ${from} → ${selectedService} (${targetService.port})`);
 
     try {
-      await axios.post(`http://localhost:${targetService.port}/webhook`, req.body);
+      // await axios.post(`http://localhost:${targetService.port}/webhook`, req.body);
+      await axios.post(targetService.url, req.body);
     } catch (err) {
       console.error(`❌ Failed to forward message to ${selectedService}:`, err.message);
       await sendTextMessage(from, "⚠️ Service temporarily unavailable. Please try again later.");

@@ -277,7 +277,7 @@ async function sendMenuButtons(to) {
                   { id: "bath", title: "🚿 Bathroom Designer" },
                   { id: "livspace", title: "🏠 Livspace" },
                   { id: "ai", title: "🤖 AI Room Designer" },
-                  { id: "proposal-estimator", title: "📐 Proposal Estimator" },
+                  { id: "proposal-estimator", title: "📐 Proposal Generator" },
                 ],
               },
             ],

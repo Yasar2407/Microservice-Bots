@@ -4,6 +4,10 @@ const axios = require("axios");
 const FormData = require("form-data");
 const mime = require("mime-types");
 const PDFDocument = require("pdfkit");
+const { renderTemplate, htmlTemplate } = require("./proposalRenderer");
+
+
+
 
 const app = express();
 app.use(express.json());
@@ -228,6 +232,7 @@ async function sessionResponseAPI(to, query, msgId) {
       formData,
       {
         headers: {
+          ...formData.getHeaders(),
           "Content-Type": "multipart/form-data",
           Authorization: `Bearer ${AUTHORIZE_TOKEN}`,
           subdomain: "construex",
@@ -372,6 +377,7 @@ async function estimateGenerationAPI(to, query, msgId) {
       formData,
       {
         headers: {
+          ...formData.getHeaders(),
           "Content-Type": "multipart/form-data",
           Authorization: `Bearer ${AUTHORIZE_TOKEN}`,
           subdomain: "matbook",
@@ -383,20 +389,20 @@ async function estimateGenerationAPI(to, query, msgId) {
      // 🟢 Stop typing indicator
     await sendTypingIndicator(to, msgId, false);
 
-    const aiResult = agentRes?.data?.workflowlog?.tasks?.find(
+    const estimateResult = agentRes?.data?.workflowlog?.tasks?.find(
       (t) => t.tool === "geminichat-tool"
     )?.result?.data;
 
-        console.log("AI Result:", aiResult);
+        console.log("AI Result:", estimateResult);
 
-    if (!aiResult) {
+    if (!estimateResult) {
       await sendTextMessage(to, "⚠️ No valid AI response received.");
       return;
     }
 
-    let responseText = aiResult?.items;
 
-    await generateAndSendPDF(to, responseText);
+    await proposalGenerationAPI(to, estimateResult,msgId);
+
 
 
     
@@ -409,141 +415,155 @@ async function estimateGenerationAPI(to, query, msgId) {
 }
 
 
-
-// ✅ Generate and send styled, paginated Estimate PDF via WhatsApp
-async function generateAndSendPDF(to, items) {
+// ✅Proposal generation API
+async function proposalGenerationAPI(to, query, msgId) {
   try {
-    const doc = new PDFDocument({ margin: 50 });
-    const buffers = [];
+    resetSessionTimeout(to);
 
-    doc.on("data", buffers.push.bind(buffers));
-    doc.on("end", async () => {
-      const pdfBuffer = Buffer.concat(buffers);
-      const pdfUrl = `data:application/pdf;base64,${pdfBuffer.toString("base64")}`;
-      await sendMediaMessage(to, pdfUrl, "document", "📄 Your Construction Estimate Report is ready!");
-      console.log("📤 PDF sent successfully to:", to);
-    });
+     // 🟡 Start typing indicator
+      await sendTypingIndicator(to, msgId, true);
 
-    // ======== HEADER FUNCTION ========
-    const drawHeader = () => {
-      doc.rect(0, 0, doc.page.width, 70).fill("#004aad");
-      doc.fillColor("white").font("Helvetica-Bold").fontSize(18)
-        .text("🏗️ CONSTRUCTION ESTIMATE REPORT", 50, 25);
-      doc.font("Helvetica").fontSize(9)
-        .text(`Generated on: ${new Date().toLocaleString()}`, 50, 45, { align: "right" });
-      doc.moveDown(3);
-      doc.fillColor("black");
-    };
+    const formData = new FormData();
+    formData.append("query", typeof query === "object" ? JSON.stringify(query) : query);
 
-    drawHeader();
-
-    // ======== INTRO SECTION ========
-    doc.fillColor("#004aad").font("Helvetica-Bold").fontSize(14)
-      .text("Project Summary", { underline: true });
-    doc.moveDown(0.5);
-    doc.fillColor("black").fontSize(10).text(
-      "Here’s the detailed breakdown of your project estimate, including material, labor, and total costs for each task.",
-      { align: "justify" }
-    );
-    doc.moveDown(1.5);
-
-    // ======== TABLE CONFIG ========
-    const startX = 50;
-    const tableWidth = 500;
-    const colWidths = [180, 50, 60, 70, 70, 70];
-    const headers = ["Description", "Qty", "Unit", "Material", "Labor", "Total"];
-    const rowHeight = 25;
-    let y = doc.y;
-    let grandTotal = 0;
-
-    // ======== DRAW TABLE HEADER ========
-    const drawTableHeader = (y) => {
-      doc.rect(startX, y, tableWidth, rowHeight).fill("#004aad");
-      doc.fillColor("white").font("Helvetica-Bold").fontSize(11);
-      let x = startX;
-      headers.forEach((header, i) => {
-        doc.text(header, x + 5, y + 8, {
-          width: colWidths[i],
-          align: i === 0 ? "left" : "center",
-        });
-        x += colWidths[i];
-      });
-      doc.fillColor("black").font("Helvetica").fontSize(10);
-    };
-
-    drawTableHeader(y);
-    y += rowHeight;
-
-    // ======== TABLE ROWS ========
-    items.forEach((item, index) => {
-      if (y > doc.page.height - 120) {
-        doc.addPage();
-        drawHeader();
-        y = 100;
-        drawTableHeader(y);
-        y += rowHeight;
+    const agentRes = await axios.post(
+      "https://api.gettaskagent.com/api/user/agent/start/68b7ec00da797cdad642fae6",
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders(),
+          "Content-Type": "multipart/form-data",
+          Authorization: `Bearer ${AUTHORIZE_TOKEN}`,
+          subdomain: "matbook",
+          "x-user-type": "customer",
+        },
       }
+    );
 
-      const isEven = index % 2 === 0;
-      if (isEven) doc.rect(startX, y, tableWidth, rowHeight).fill("#f9f9f9");
+     // 🟢 Stop typing indicator
+    await sendTypingIndicator(to, msgId, false);
 
-      const { description, qty, unit, materialCost, laborCost, total } = item;
-      grandTotal += Number(total) || 0;
+    const proposalResult = agentRes?.data?.workflowlog?.tasks?.find(
+      (t) => t.tool === "geminichat-tool"
+    )?.result?.data;
 
-      const rowData = [
-        description,
-        qty,
-        unit,
-        `$${materialCost.toLocaleString()}`,
-        `$${laborCost.toLocaleString()}`,
-        `$${total.toLocaleString()}`,
-      ];
+      console.log("AI Result:", proposalResult);
 
-      let x = startX;
-      rowData.forEach((text, i) => {
-        doc.fillColor("black").text(text.toString(), x + 5, y + 8, {
-          width: colWidths[i],
-          align: i === 0 ? "left" : "right",
-        });
-        x += colWidths[i];
-      });
-
-      y += rowHeight;
-    });
-
-    // ======== BORDER LINES ========
-    doc.strokeColor("#ccc").lineWidth(0.5);
-    let lineX = startX;
-    for (let i = 0; i <= headers.length; i++) {
-      doc.moveTo(lineX, doc.y - (items.length * rowHeight)).lineTo(lineX, y).stroke();
-      lineX += colWidths[i] || 0;
+    if (!proposalResult) {
+      await sendTextMessage(to, "⚠️ No valid AI response received.");
+      return;
     }
-    doc.moveTo(startX, y).lineTo(startX + tableWidth, y).stroke();
 
-    // ======== GRAND TOTAL ========
-    doc.moveDown(2);
-    doc.font("Helvetica-Bold").fontSize(14).fillColor("#004aad")
-      .text(`Grand Total: $${grandTotal.toLocaleString()}`, { align: "right" });
+    await templateToSharedAPI(to, query, proposalResult, msgId);
 
-    // ======== FOOTER ========
-    doc.moveDown(3);
-    doc.font("Helvetica").fontSize(10).fillColor("gray")
-      .text("This estimate is valid for 30 days. Prices may vary based on market and material availability.", { align: "center" });
-    doc.moveDown(1);
-    doc.font("Helvetica-Bold").fontSize(10).fillColor("#004aad")
-      .text("Thank you for your trust — we look forward to building your vision!", { align: "center" });
-
-    doc.moveTo(50, doc.page.height - 50).lineTo(doc.page.width - 50, doc.page.height - 50).strokeColor("#004aad").stroke();
-    doc.font("Helvetica").fontSize(8).fillColor("gray")
-      .text("© 2025 MatBook Construction Estimator", 50, doc.page.height - 45, { align: "center" });
-
-    doc.end();
   } catch (err) {
-    console.error("❌ PDF generation error:", err.response?.data || err.message);
+    await sendTypingIndicator(to, msgId, false);
+    console.error("❌ Agent API error:", err.response?.data || err.message);
+    await sendTextMessage(to, "⚠️ Something went wrong while generating your design.");
+  }
+}
+
+// ✅Estimate generation API
+async function templateToSharedAPI(to, query, proposalResult, msgId) {
+  try {
+    resetSessionTimeout(to);
+
+     // 🟡 Start typing indicator
+      await sendTypingIndicator(to, msgId, true);
+
+    const formData = new FormData();
+    formData.append("estimationResult", typeof query === "object" ? JSON.stringify(query) : query);
+    formData.append("proposalResult", typeof proposalResult === "object" ? JSON.stringify(proposalResult) : proposalResult);
+
+    const agentRes = await axios.post(
+      "https://api.gettaskagent.com/api/user/agent/start/690a149a143439d4392c57db",
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders(),
+          "Content-Type": "multipart/form-data",
+          Authorization: `Bearer ${AUTHORIZE_TOKEN}`,
+          subdomain: "construex",
+          "x-user-type": "customer",
+        },
+      }
+    );
+
+     // 🟢 Stop typing indicator
+    await sendTypingIndicator(to, msgId, false);
+
+    const sharedResult = agentRes?.data?.workflowlog?.tasks?.find(
+      (t) => t.tool === "shared-template-creator"
+    )?.result?.data;
+
+      console.log("AI Result:", sharedResult);
+
+    if (!sharedResult) {
+      await sendTextMessage(to, "⚠️ No valid AI response received.");
+      return;
+    }
+
+
+    const sharedLink = sharedResult?.data;
+
+    await sendCTAButtonMessage(to,"✅ Your proposal document is ready! Click below to view and share it.","View Proposal",sharedLink,"Thank you for using our service! 🚀")
+
+    await sendTextMessage(
+    to,
+    `✅ *Proposal Document Uploaded Successfully!*\n🌐 *View Proposal:* ${sharedLink}\n\nThank you for using our service! 🚀`
+  );
+
+
+
+    
+
+  } catch (err) {
+    await sendTypingIndicator(to, msgId, false);
+    console.error("❌ Agent API error:", err.response?.data || err.message);
+    await sendTextMessage(to, "⚠️ Something went wrong while generating your design.");
   }
 }
 
 
+// ✅ CTA URL Button Message Sender
+async function sendCTAButtonMessage(to, bodyText, buttonLabel, buttonUrl, footerText) {
+  console.log("📤 Sending CTA URL button message to:", to);
+
+  try {
+    const response = await axios.post(
+      `https://graph.facebook.com/v24.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "cta_url",
+          body: { text: bodyText },
+          footer: { text: footerText },
+          action: {
+            name: "cta_url",
+            parameters: {
+              display_text: buttonLabel,
+              url: buttonUrl,
+            },
+          },
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("✅ CTA URL message sent:", response.data);
+    return response.data;
+  } catch (err) {
+    console.error("❌ Error sending CTA button:", err.response?.data || err.message);
+  }
+}
 
 
 // ✅ Typing Indicator Sender

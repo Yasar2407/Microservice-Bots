@@ -3,6 +3,7 @@ const express = require("express");
 const axios = require("axios");
 const FormData = require("form-data");
 const mime = require("mime-types");
+const { parse } = require("dotenv");
 
 const app = express();
 app.use(express.json());
@@ -112,7 +113,11 @@ app.post("/webhook", async (req, res) => {
       );
       console.log("🌐 Uploaded URLs:", uploadedUrls);
 
-      await sessionResponseAPI(from, uploadedUrls?.[0],msgId);
+      // await sessionResponseAPI(from, uploadedUrls?.[0],msgId);
+      await sessionResponseAPI(from, {
+    url: uploadedUrls?.[0],
+    caption: caption
+  }, msgId);
 
       // await sendTextMessage(from, `✅ Image uploaded successfully!\n${uploadedUrls?.[0] || ""}`);
     }
@@ -174,13 +179,12 @@ async function sessionResponseAPI(to, query, msgId) {
     await sendTypingIndicator(to, msgId, true);
 
     const formData = new FormData();
-    formData.append("query", query);
+    formData.append("query", typeof query === "object" ? JSON.stringify(query) : query);
 
     // ♻️ Reuse session if available
-    const existingSessionId = userSessions[to];
-    if (existingSessionId) {
-      formData.append("sessionId", existingSessionId);
-      console.log(`♻️ Using existing session for ${to}: ${existingSessionId}`);
+     if (userSessions[to]) {
+      formData.append("sessionId", userSessions[to]);
+      console.log(`♻️ Using existing session: ${userSessions[to]}`);
     }
 
     // 🔹 Call AI agent
@@ -213,32 +217,14 @@ async function sessionResponseAPI(to, query, msgId) {
       return;
     }
 
-    // 🧩 Extract the structured response and query
     let responseText = aiResult.response;
-    let userQuery = query;
-
-    try {
-      // Only parse if it looks like JSON content
-      if (typeof responseText === "string") {
- const cleaned = responseText
-      .replace(/^[\s\S]*?```json/i, "") // remove everything before ```json
-      .replace(/```[\s\S]*$/i, "")      // remove everything after ```
-      .trim();
-      const parsed = JSON.parse(cleaned);
-
-        if (parsed?.response) responseText = parsed.response;
-        if (parsed?.query) userQuery = parsed.query;
-      }
-    } catch (err) {
-      console.warn("⚠️ Failed to parse structured JSON, using raw response text.");
-    }
-
-    // 💾 Save session
     const sessionId = aiResult.session_id;
+
     if (sessionId && !userSessions[to]) {
       userSessions[to] = sessionId;
-      console.log(`💾 Saved new session for ${to}: ${sessionId}`);
+      console.log(`💾 New session saved for ${to}: ${sessionId}`);
     }
+
 
         if (typeof responseText === "string") {
   responseText = responseText
@@ -250,6 +236,8 @@ async function sessionResponseAPI(to, query, msgId) {
   if (responseText.startsWith("{")) {
       try {
         const parsed = JSON.parse(responseText);
+        console.log('');
+        
          // 🔹 Common footer to append to every message type
         const footerText = "\n\nType *1* anytime - return to *main menu*.";
 
@@ -264,15 +252,15 @@ async function sessionResponseAPI(to, query, msgId) {
         }
 
         // ✅ Case 2: Quick Replies (send as List Message)
-        // if (parsed.response && Array.isArray(parsed.quick_replies)) {
-        //   console.log("📋 Detected 'quick_replies' response");
-        //   const limitedReplies = parsed.quick_replies.slice(0, 10);
-        //   const options = limitedReplies.map((b, idx) => ({
-        //     id: `qr_${idx + 1}`,
-        //     title: b,
-        //   }));
-        //   return sendListMessage(to, `${parsed.response}${footerText}`, options);
-        // }
+        if (parsed.response && Array.isArray(parsed.quick_replies)) {
+          console.log("📋 Detected 'quick_replies' response");
+          const limitedReplies = parsed.quick_replies.slice(0, 10);
+          const options = limitedReplies.map((b, idx) => ({
+            id: `qr_${idx + 1}`,
+            title: b,
+          }));
+          return sendListMessage(to, `${parsed.response}${footerText}`, options);
+        }
 
 
          // ✅ Case 4: Image Message
@@ -288,15 +276,19 @@ async function sessionResponseAPI(to, query, msgId) {
         }
 
           // ✅ Case 6: Final input detection
-         if (parsed.response && parsed.final_input) {
-          console.log("🏁 Detected final input, calling estimate generation API...");
-        
-          // ✅ Send only the `fullDescription` field
-          const fullDescription = parsed.final_input.fullDescription;
-          if (fullDescription) {
-            await estimateGenerationAPI(to, fullDescription, msgId);
+         if (parsed.response && parsed.infos) {
+          console.log("🏁 Detected query calling estimate generation API...");
+
+          const response = parsed.response;
+           await sendTextMessage(to, response);
+
+          // ✅ Send only the `fullQuery` field
+          const image = parsed.infos.imageUrl || "";
+          const fullQuery = parsed.infos.query;
+          if (fullQuery) {
+             await callAgentAPI(to, fullQuery,image, msgId);
           } else {
-            console.warn("⚠️ No fullDescription found in final_input.");
+            console.warn("⚠️ No fullQuery found in final_input.");
             await sendTextMessage(to, "⚠️ Missing project details. Please try again.");
           }
         
@@ -311,7 +303,7 @@ async function sessionResponseAPI(to, query, msgId) {
 
 
         // ✅ Case 7: Plain text fallback
-        if (parsed.response && !parsed.buttons && !parsed.quick_replies && !parsed.location_request && !parsed.image_url && !parsed.audio  && !parsed.final_input) {
+        if (parsed.response && !parsed.buttons && !parsed.quick_replies && !parsed.location_request && !parsed.image_url && !parsed.audio  && !parsed.infos) {
           console.log("💬 Detected plain text response");
           return sendTextMessage(to, `${parsed.response}${footerText}`);
         }
@@ -325,11 +317,6 @@ async function sessionResponseAPI(to, query, msgId) {
     // 📨 Always send only the "response" part to WhatsApp
     await sendTextMessage(to, responseText);
 
-    // 🚀 If the query was extracted from AI JSON, call next API
-    if (userQuery && userQuery !== query) {
-      console.log(`🚀 Forwarding extracted query to callAgentAPI: ${userQuery}`);
-      await callAgentAPI(to, userQuery, msgId);
-    }
 
   } catch (err) {
     await sendTypingIndicator(to, msgId, false);
@@ -366,13 +353,20 @@ async function sendTypingIndicator(to, messageId, isTyping) {
 }
 
 
-async function callAgentAPI(to, query, msgId) {
+async function callAgentAPI(to, query, image, msgId) {
   try {
     // 🟡 Start typing indicator
     await sendTypingIndicator(to, msgId, true);
 
+    console.log('QUERY:',query);
+    
+
     const formData = new FormData();
     formData.append("query", query);
+
+    if (image) {
+      formData.append("image", image);
+    }
 
     const agentRes = await axios.post(
       "https://api.gettaskagent.com/api/user/agent/start/6900be6627a015e1ec35ebaa",
@@ -390,13 +384,29 @@ async function callAgentAPI(to, query, msgId) {
      // 🟢 Stop typing indicator
     await sendTypingIndicator(to, msgId, false);
 
-    const aiResult = agentRes?.data?.workflowlog?.tasks?.find(
-      (t) => t.tool === "generate-image(1)"
-    )?.result?.data;
+    console.log("🤖 Agent API success:", agentRes.data);
 
+    // const aiResult = agentRes?.data?.workflowlog?.tasks?.find(
+    //   (t) => t.tool === "generate-image(1)"
+    // )?.result?.data;
+
+    const tasks = agentRes?.data?.workflowlog?.tasks || [];
+
+    const imageTask = tasks.find((t) =>
+    t.tool?.toLowerCase().includes("generate-image") ||
+    t.tool?.toLowerCase().includes("multi-image-upload-and-generate")
+    );
+
+  const aiResult = imageTask?.result?.data;
+
+  console.log("AI Result:", aiResult);
+  
     if (!Array.isArray(aiResult) || aiResult.length === 0) {
   throw new Error("No AI result data found or invalid format.");
 }
+
+  // Collect cards for carousel
+    // const carouselCards = [];
 
     for (const iteration of aiResult) {
   try {
@@ -419,12 +429,31 @@ async function callAgentAPI(to, query, msgId) {
     await sendInteractiveDesignReply(to, mediaId, promptText);
     console.log(`✅ Sent interactive design reply for iteration ${iteration?.iteration}`);
 
+//     carouselCards.push({
+//   headerAssetId: mediaId,
+//   title: "🖼️ AI Design Preview", // max 24 chars
+//   description: "Here’s your personalized design idea from AI Home Designer 🧠✨",
+//   urlButtonText: "View Full Image",
+//   urlButtonUrl: imageUrl,
+// });
+
+
     // 3️⃣ Optional: Delay between sends (to avoid WhatsApp rate limits)
     await new Promise((res) => setTimeout(res, 2000));
 
   } catch (err) {
     console.error(`❌ Error processing iteration ${iteration?.iteration}:`, err.message);
   }
+
+//    if (carouselCards.length > 0) {
+//      await sendInteractiveMediaCarouselWithCards(
+//   to,
+//   "AI Designs",
+//   "Choose your design",
+//   carouselCards
+// );
+//       console.log("✅ Sent final media carousel with all AI designs!");
+//     }
 }
   } catch (err) {
     await sendTypingIndicator(to, msgId, false);
@@ -541,6 +570,43 @@ async function sendButtonMessage(to, text, options) {
   );
 }
 
+// ✅ List message sender
+async function sendListMessage(to, text, options) {
+  return axios.post(
+    `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+    {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        header: { type: "text", text: "Please choose an option" },
+        body: { text: text },
+        footer: { text: "Home Designer Assistant" },
+        action: {
+          button: "Select Option",
+          sections: [
+            {
+              title: "Available Options",
+              rows: options.map(opt => ({
+                id: opt.id,
+                title: opt.title,
+                description: "",
+              })),
+            },
+          ],
+        },
+      },
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+}
+
 // 🔹 Get media URL from media ID
 async function getMediaUrl(mediaId) {
   const res = await axios.get(`https://graph.facebook.com/v21.0/${mediaId}`, {
@@ -580,6 +646,143 @@ async function uploadToExternalAPI(buffer, filename, mimeType) {
   const uploadedUrls = res.data?.files?.map((f) => f.Location);
   return uploadedUrls;
 }
+
+
+// ✅ Media-Card Carousel Template Sender
+// ✅ Send Interactive Carousel with Images & Titles/Descriptions
+// async function sendInteractiveMediaCarouselWithCards(to, carouselTitle, bodyText, cardsData) {
+//   console.log("📤 Sending interactive media carousel with cards to:", to);
+
+//   try {
+//     // Map carouselCards to WhatsApp interactive rows
+//     const rows = cardsData.map((card, idx) => ({
+//       id: card.id || `design_${idx + 1}`,
+//       title: card.title?.slice(0, 24) || `Design ${idx + 1}`, // max 24 chars
+//       description: card.description?.slice(0, 72) || "",
+//       image: card.headerAssetId ? { id: card.headerAssetId } : undefined
+//       // Note: URL buttons can't be directly added per row; handle clicks via webhook
+//     }));
+
+//     const payload = {
+//       messaging_product: "whatsapp",
+//       to,
+//       type: "interactive",
+//       interactive: {
+//         type: "carousel",
+//         header: { type: "text", text: carouselTitle },
+//         body: { text: bodyText },
+//         action: {
+//           sections: [
+//             {
+//               title: "Designs",
+//               rows
+//             }
+//           ]
+//         }
+//       }
+//     };
+
+//     const response = await axios.post(
+//       `https://graph.facebook.com/v24.0/${PHONE_NUMBER_ID}/messages`,
+//       payload,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${ACCESS_TOKEN}`,
+//           "Content-Type": "application/json"
+//         }
+//       }
+//     );
+
+//     console.log("✅ Interactive media carousel with cards sent:", response.data);
+//     return response.data;
+
+//   } catch (err) {
+//     console.error("❌ Error sending interactive media carousel with cards:", err.response?.data || err.message);
+//   }
+// }
+
+
+// ✅ Media-Card Carousel Template Sender (URL Buttons Only)
+// async function sendMediaCarouselURL(to, templateName, languageCode, bodyVariables, cardsData) {
+//   console.log("📤 Sending Media Carousel with URL buttons to:", to);
+
+//   try {
+//     // Construct body component
+//     const components = [
+//       {
+//         type: "body",
+//         parameters: bodyVariables.map(text => ({
+//           type: "text",
+//           text
+//         }))
+//       },
+//       {
+//         type: "carousel",
+//         cards: cardsData.map((card, idx) => ({
+//           card_index: idx,
+//           components: [
+//             // Header: image or video
+//             {
+//               type: "header",
+//               parameters: [
+//                 {
+//                   type: card.headerFormat,
+//                   [card.headerFormat]: { id: card.headerAssetId }
+//                 }
+//               ]
+//             },
+//             // Optional card body text
+//             ...(card.bodyText
+//               ? [{
+//                   type: "body",
+//                   parameters: [{ type: "text", text: card.bodyText }]
+//                 }]
+//               : []),
+//             // URL Button (only)
+//             ...(card.urlButtonUrl && card.urlButtonText
+//               ? [{
+//                   type: "button",
+//                   sub_type: "url",
+//                   index: "0",
+//                   parameters: [{ type: "text", text: card.urlButtonUrl }]
+//                 }]
+//               : [])
+//           ]
+//         }))
+//       }
+//     ];
+
+//     const payload = {
+//       messaging_product: "whatsapp",
+//       recipient_type: "individual",
+//       to,
+//       type: "template",
+//       template: {
+//         name: templateName,
+//         language: { code: languageCode },
+//         components
+//       }
+//     };
+
+//     const response = await axios.post(
+//       `https://graph.facebook.com/v24.0/${PHONE_NUMBER_ID}/messages`,
+//       payload,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${ACCESS_TOKEN}`,
+//           "Content-Type": "application/json"
+//         }
+//       }
+//     );
+
+//     console.log("✅ Media Carousel with URL buttons sent:", response.data);
+//     return response.data;
+
+//   } catch (err) {
+//     console.error("❌ Error sending Media Carousel with URL buttons:", err.response?.data || err.message);
+//   }
+// }
+
 
 
 // 🔹 Reusable text message sender

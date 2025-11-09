@@ -3,7 +3,7 @@ const express = require("express");
 const axios = require("axios");
 const FormData = require("form-data");
 const mime = require("mime-types");
-const PDFDocument = require("pdfkit");
+// const PDFDocument = require("pdfkit");
 const { renderTemplate, htmlTemplate } = require("./proposalRenderer");
 
 

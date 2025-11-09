@@ -82,7 +82,7 @@ services:
     env: node
     plan: free
     rootDir: services/abyat
-    buildCommand: npm install && pnpm approve-builds
+    buildCommand: npm install
     startCommand: node server.js
     envVars:
       - key: PORT

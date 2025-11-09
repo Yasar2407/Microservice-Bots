@@ -18,6 +18,7 @@ const sessionTimeouts = {};
 //   livspace: { port: 7002 },
 //   ai: { port: 7003 },
 //   "proposal-estimator": { port: 7004 },
+//   "abyat-imagine": { port: 7005 },
 // };
 
 const MICROSERVICES = {
@@ -25,6 +26,7 @@ const MICROSERVICES = {
   livspace: { url: "https://livspace-k2lk.onrender.com/webhook" },
   ai: { url: "https://ai-session-k2lk.onrender.com/webhook" },
   "proposal-estimator": { url: "https://proposal-estimator-k2lk.onrender.com/webhook" },
+  "abyat-imagine": { url: "https://abyat-imagine.onrender.com/webhook" },
 };
 
 
@@ -137,6 +139,7 @@ app.post("/webhook", async (req, res) => {
       else if (text.includes("liv") || text.includes("livspace")) selected = "livspace";
       else if (text.includes("ai")) selected = "ai";
       else if (text.includes("proposal")) selected = "proposal-estimator";
+      else if (text.includes("abyat")) selected = "abyat-imagine";
 
       if (!selected) {
         await sendTypingIndicator(from, msgId, false);
@@ -149,6 +152,8 @@ app.post("/webhook", async (req, res) => {
       console.log(`✅ ${from} selected ${selected}`);
 
       const targetService = MICROSERVICES[selected];
+      console.log('TARGET:',targetService);
+      
       try {
         // await axios.post(`http://localhost:${targetService.port}/webhook`, {
         await axios.post(targetService.url, {
@@ -275,9 +280,10 @@ async function sendMenuButtons(to) {
                 title: "Design Services",
                 rows: [
                   { id: "bath", title: "🚿 Bathroom Designer" },
-                  { id: "livspace", title: "🏠 Livspace" },
+                  { id: "livspace", title: "🎨 Livspace" },
                   { id: "ai", title: "🤖 AI Room Designer" },
                   { id: "proposal-estimator", title: "📐 Proposal Generator" },
+                  { id: "abyat-imagine", title: "🏠 Abyat Imagine" },
                 ],
               },
             ],

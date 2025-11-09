@@ -26,7 +26,7 @@ const MICROSERVICES = {
   livspace: { url: "https://livspace-k2lk.onrender.com/webhook" },
   ai: { url: "https://ai-session-k2lk.onrender.com/webhook" },
   "proposal-estimator": { url: "https://proposal-estimator-k2lk.onrender.com/webhook" },
-  "abyat-imagine": { url: "https://abyat-imagine.onrender.com/webhook" },
+  "abyat-imagine": { url: "https://abyat-imagine-k2lk.onrender.com/webhook" },
 };
 
 

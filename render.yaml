@@ -101,7 +101,7 @@ services:
     env: node
     plan: free
     rootDir: services/proposal-estimator
-    buildCommand: pnpm install
+    buildCommand: npm install
     startCommand: node server.js
     envVars:
       - key: PORT

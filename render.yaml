@@ -81,7 +81,7 @@ services:
     name: abyat-imagine
     env: node
     plan: free
-    rootDir: services/abyat-imagine
+    rootDir: services/abyat
     buildCommand: npm install && pnpm approve-builds
     startCommand: node server.js
     envVars:

@@ -82,12 +82,7 @@ function resetSessionTimeout(userId) {
     console.log(
       `⏰ Session expired for ${userId}. Removing from userSessions.`
     );
-    delete userSessions[userId];
-    // delete userSteps[userId];
-    // delete userFacets[userId];
-    delete userDesignStates[userId];
-    delete userFacetContext[userId];
-    delete userInspirationContext[userId];
+    clearUserState(userId);
     delete sessionTimeouts[userId];
 
       // 🔔 Notify Gateway
@@ -142,6 +137,8 @@ async function startEditPreferenceSession(userId, options = {}) {
   const {
     primaryImageUrl = null,
     primaryCaption = null,
+    primaryImageMediaId = null,
+    primaryImageWhatsAppId = null,
   } = options;
 
   const uploadedImages = [];
@@ -152,6 +149,8 @@ async function startEditPreferenceSession(userId, options = {}) {
       sourceUrl: primaryImageUrl,
       isPrimary: true,
       caption: primaryCaption || null,
+      mediaId: primaryImageMediaId || null,
+      whatsAppMediaId: primaryImageWhatsAppId || primaryImageMediaId || null,
     });
   }
 
@@ -219,16 +218,6 @@ async function handleEditSessionText(userId, rawText, meta = {}) {
     return true;
   }
 
-  const userImageCount = getUserUploadedImageCount(session);
-
-  if (userImageCount < 1) {
-    await sendTextMessage(
-      userId,
-      "Please upload at least one of your own inspiration photos before sharing the changes you'd like."
-    );
-    return true;
-  }
-
   if (["generate", "submit"].includes(text.toLowerCase())) {
     await handleEditSessionGenerate(userId, {
       messageId: typeof meta.messageId === "string" ? meta.messageId : null,
@@ -277,16 +266,6 @@ async function handleEditSessionGenerate(userId, options = {}) {
   const typingMessageId =
     typeof options.messageId === "string" ? options.messageId : null;
 
-  const userImageCount = getUserUploadedImageCount(session);
-
-  if (userImageCount < 1) {
-    await sendTextMessage(
-      userId,
-      "Upload at least one of your own inspiration photos before generating an updated design."
-    );
-    return true;
-  }
-
   if (!session.pendingQuery) {
     await sendTextMessage(userId, "Please type what you would like to adjust before generating.");
     return true;
@@ -313,10 +292,10 @@ async function sendEditSessionSummary(userId) {
 
   const totalImageCount = session.uploadedImages.length;
   const userImageCount = getUserUploadedImageCount(session);
-  const hasMinimumUserImages = userImageCount >= 1;
+  const hasUserImages = userImageCount >= 1;
   const summaryLines = [];
 
-  if (totalImageCount > 0) {
+  if (userImageCount > 0) {
     summaryLines.push(
       `Images saved: ${userImageCount}${
         session.uploadedImages.some((img) => img.isPrimary)
@@ -328,10 +307,12 @@ async function sendEditSessionSummary(userId) {
     summaryLines.push("No reference images yet.");
   }
 
-  if (!hasMinimumUserImages) {
-    summaryLines.push("Upload at least one inspiration photo to continue.");
-  } else if (session.pendingQuery) {
+  if (session.pendingQuery) {
     summaryLines.push(`Request:\n${session.pendingQuery}`);
+  } else if (hasUserImages) {
+    summaryLines.push("Type your updated request to continue.");
+  } else {
+    summaryLines.push("Share what you'd like to change or add inspiration photos to guide the update.");
   }
 
   session.actions = {
@@ -371,7 +352,7 @@ async function sendEditSessionSummary(userId) {
     headerText = session.pendingQuery;
   }
 
-  if (session.pendingQuery && hasMinimumUserImages) {
+  if (session.pendingQuery) {
     const prompt = `${summaryLines.join("\n\n")}\n\nReady to generate the update?`;
 
     await sendInteractiveButtonMessage(
@@ -381,8 +362,8 @@ async function sendEditSessionSummary(userId) {
         { id: "edit_generate", title: "Generate" },
         { id: "edit_cancel", title: "Cancel" },
       ],
-      mediaId
-      // headerText
+      mediaId,
+      headerText
     );
 
     console.log("📤 Sent edit summary with header:", {
@@ -392,12 +373,9 @@ async function sendEditSessionSummary(userId) {
       hasPendingQuery: true,
       totalImageCount,
       userImageCount,
+      hasUserImages,
     });
   } else {
-    if (hasMinimumUserImages && !session.pendingQuery) {
-      summaryLines.push("Type your updated request to continue.");
-    }
-
     await sendTextMessage(userId, summaryLines.join("\n\n"));
 
     console.log("ℹ️ Prompted user for edit request:", {
@@ -405,7 +383,7 @@ async function sendEditSessionSummary(userId) {
       hasPendingQuery: Boolean(session.pendingQuery),
       totalImageCount,
       userImageCount,
-      hasMinimumUserImages,
+      hasUserImages,
     });
   }
 }
@@ -1078,26 +1056,26 @@ async function sendInspirationPreviewOptions(
       }
     }
   
-    const finalOptions = [
-      { id: "regenerate_inspirations", title: "Regenerate" },
-    ];
+    // const finalOptions = [
+    //   { id: "regenerate_inspirations", title: "Regenerate" },
+    // ];
   
-    context.actions.regenerate_inspirations = { action: "regenerate_inspirations" };
+    // context.actions.regenerate_inspirations = { action: "regenerate_inspirations" };
   
-    userFacetContext[to] = {
-      facetKey: null,
-      options: finalOptions,
-      timestamp: Date.now(),
-      preview: true,
-    };
+    // userFacetContext[to] = {
+    //   facetKey: null,
+    //   options: finalOptions,
+    //   timestamp: Date.now(),
+    //   preview: true,
+    // };
   
-    await sendButtonMessage(
-      to,
-      "Would you like another set of inspirations or adjust your preferences?",
-      finalOptions.map(({ id, title }) => ({ id, title })),
-      undefined,
-      { includeFooter: false }
-    );
+    // await sendButtonMessage(
+    //   to,
+    //   "Would you like another set of inspirations or adjust your preferences?",
+    //   finalOptions.map(({ id, title }) => ({ id, title })),
+    //   undefined,
+    //   { includeFooter: false }
+    // );
   
     return true;
   }
@@ -1586,14 +1564,18 @@ app.post("/webhook", async (req, res) => {
 
       touchEditSession(from);
 
-      const imageCount = editSession.uploadedImages.length;
-      const encouragementLines = [
-        "✅ Photo added to your edit board.",
-        imageCount > 1
-          ? `You now have ${imageCount} inspiration photos ready.`
-          : "This image is now ready for your update.",
-        "Send more photos, describe what to change, or type *7* to wrap up edit mode.",
-      ];
+      const userImageCount = getUserUploadedImageCount(editSession);
+      const encouragementLines = ["✅ Photo added to your edit board."];
+
+      if (userImageCount > 1) {
+        encouragementLines.push(`You now have ${userImageCount} inspiration photos ready.`);
+      } else {
+        encouragementLines.push("This image is now ready for your update.");
+      }
+
+      encouragementLines.push(
+        "Send more photos, describe what to change, or type *7* to wrap up edit mode."
+      );
       await sendTextMessage(from, encouragementLines.join("\n\n"));
 
       if (editSession.pendingQuery) {
@@ -1688,6 +1670,19 @@ async function sessionResponseAPI(to, query, meta = {}) {
       await startEditPreferenceSession(to, {
         primaryImageUrl: designActionMeta?.primaryImageUrl || null,
         primaryCaption: designActionMeta?.primaryCaption || null,
+        primaryImageMediaId: designActionMeta?.primaryImageMediaId || null,
+        primaryImageWhatsAppId: designActionMeta?.primaryImageWhatsAppId || null,
+      });
+      return;
+    }
+
+    if (designAction === "start_edit_preferences") {
+      delete userInspirationContext[to];
+      await startEditPreferenceSession(to, {
+        primaryImageUrl: designActionMeta?.primaryImageUrl || null,
+        primaryCaption: designActionMeta?.primaryCaption || null,
+        primaryImageMediaId: designActionMeta?.primaryImageMediaId || null,
+        primaryImageWhatsAppId: designActionMeta?.primaryImageWhatsAppId || null,
       });
       return;
     }
@@ -2071,7 +2066,40 @@ async function callAgentAPI(to, query, files = [], options = {}) {
     const actionOptions = [
       { id: "edit_result_ok", title: "Looks Good" },
       { id: "edit_result_refine", title: "Edit Again" },
+      { id: "edit_result_preferences", title: "Edit Preferences" },
     ];
+
+    const fallbackPinnedImage =
+      Array.isArray(files) && files.length > 0
+        ? files.find(
+            (file) =>
+              file.isPrimary && (file.uploadedUrl || file.sourceUrl || file.mediaId)
+          ) ||
+          null
+        : null;
+
+    const refineBaseImage = fallbackPinnedImage || null;
+
+    const refineImageMeta = refineBaseImage
+      ? {
+          primaryImageUrl: refineBaseImage.uploadedUrl || refineBaseImage.sourceUrl || null,
+          primaryCaption: refineBaseImage.caption || null,
+          primaryImageMediaId: refineBaseImage.mediaId || null,
+          primaryImageWhatsAppId: refineBaseImage.whatsAppMediaId || refineBaseImage.mediaId || null,
+        }
+      : {
+          primaryImageUrl: imageUrl,
+          primaryCaption: iterationName,
+          primaryImageMediaId: mediaId,
+          primaryImageWhatsAppId: mediaId,
+        };
+
+    const editPreferencesMeta = {
+      primaryImageUrl: imageUrl,
+      primaryCaption: iterationName,
+      primaryImageMediaId: mediaId,
+      primaryImageWhatsAppId: mediaId,
+    };
 
     // 2️⃣ Send interactive reply to WhatsApp user
     await sendInteractiveButtonMessage(to, messageText, actionOptions, mediaId);
@@ -2083,8 +2111,11 @@ async function callAgentAPI(to, query, files = [], options = {}) {
         edit_result_ok: { action: "final_design_accept" },
         edit_result_refine: {
           action: "restart_edit_session",
-          primaryImageUrl: imageUrl,
-          primaryCaption: iterationName,
+          ...refineImageMeta,
+        },
+        edit_result_preferences: {
+          action: "start_edit_preferences",
+          ...editPreferencesMeta,
         },
       },
     };

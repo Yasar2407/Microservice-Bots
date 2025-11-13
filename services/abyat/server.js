@@ -2440,6 +2440,10 @@ async function sendTextMessage(to, message) {
   );
 }
 
+// ✅ Basic root endpoint
+app.get('/', (req, res)=>{
+    res.send("Welcome to Abyat Imagine Gateway!")
+})
 
 app.listen(process.env.PORT, () => {
   console.log(`✅ WhatsApp RAG bot running on port ${process.env.PORT}`);

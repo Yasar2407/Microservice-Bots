@@ -403,7 +403,11 @@ async function sendFallbackMessage(to) {
 //   );
 // }
 
-const PORT = process.env.PORT || 8000;
-app.listen(PORT, () =>
-  console.log(`🚀 WhatsApp bot running on port ${PORT}`)
-);
+// ✅ Basic root endpoint
+app.get('/', (req, res)=>{
+    res.send("Welcome to Bath Measure Gateway!")
+})
+
+app.listen(process.env.PORT, () => {
+  console.log(`✅ WhatsApp RAG bot running on port ${process.env.PORT}`);
+});

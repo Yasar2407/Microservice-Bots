@@ -317,7 +317,7 @@ app.post("/session-expired", async (req, res) => {
 
 // ✅ Basic root endpoint
 app.get('/', (req, res)=>{
-    res.send("Welcome to BuilderPluss WhatsApp Gateway!")
+    res.send("Welcome to BuilderPluss WhatsApp Gateway!") 
 })
 
 // ✅ Start server

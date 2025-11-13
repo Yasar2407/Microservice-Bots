@@ -27,8 +27,8 @@ function resetSessionTimeout(userId) {
 
   // 🔔 Notify Gateway
   try {
-    // await axios.post("http://localhost:7000/session-expired", { user: userId });
-    await axios.post("https://whatsapp-gateway-k2lk.onrender.com/session-expired", { user: userId });
+    await axios.post("http://localhost:7000/session-expired", { user: userId });
+    // await axios.post("https://whatsapp-gateway-k2lk.onrender.com/session-expired", { user: userId });
 
   } catch (err) {
     console.error("⚠️ Failed to notify gateway about session expiration:", err.message);
@@ -113,7 +113,11 @@ app.post("/webhook", async (req, res) => {
       );
       console.log("🌐 Uploaded URLs:", uploadedUrls);
 
-      await sessionResponseAPI(from, uploadedUrls?.[0],msgId);
+      // await sessionResponseAPI(from, uploadedUrls?.[0],msgId);
+      await sessionResponseAPI(from, {
+    url: uploadedUrls?.[0],
+    caption: caption
+  }, msgId);
 
       // await sendTextMessage(from, `✅ Image uploaded successfully!\n${uploadedUrls?.[0] || ""}`);
     }
@@ -175,7 +179,7 @@ async function sessionResponseAPI(to, query, msgId) {
     await sendTypingIndicator(to, msgId, true);
 
     const formData = new FormData();
-    formData.append("query", query);
+    formData.append("query", typeof query === "object" ? JSON.stringify(query) : query);
 
     // ♻️ Reuse session if available
      if (userSessions[to]) {
@@ -402,7 +406,7 @@ async function callAgentAPI(to, query, image, msgId) {
 }
 
   // Collect cards for carousel
-    const carouselCards = [];
+    // const carouselCards = [];
 
     for (const iteration of aiResult) {
   try {
@@ -422,16 +426,17 @@ async function callAgentAPI(to, query, image, msgId) {
     console.log(`✅ Uploaded image. Media ID: ${mediaId}`);
 
     // 2️⃣ Send interactive reply to WhatsApp user
-    // await sendInteractiveDesignReply(to, mediaId, promptText);
-    // console.log(`✅ Sent interactive design reply for iteration ${iteration?.iteration}`);
+    await sendInteractiveDesignReply(to, mediaId, promptText);
+    console.log(`✅ Sent interactive design reply for iteration ${iteration?.iteration}`);
 
-    carouselCards.push({
-          headerAssetId: mediaId,
-          headerFormat: "image",
-          bodyText: promptText,
-          urlButtonText: "View Full Image",
-          urlButtonUrl: imageUrl,
-    });
+//     carouselCards.push({
+//   headerAssetId: mediaId,
+//   title: "🖼️ AI Design Preview", // max 24 chars
+//   description: "Here’s your personalized design idea from AI Home Designer 🧠✨",
+//   urlButtonText: "View Full Image",
+//   urlButtonUrl: imageUrl,
+// });
+
 
     // 3️⃣ Optional: Delay between sends (to avoid WhatsApp rate limits)
     await new Promise((res) => setTimeout(res, 2000));
@@ -440,15 +445,15 @@ async function callAgentAPI(to, query, image, msgId) {
     console.error(`❌ Error processing iteration ${iteration?.iteration}:`, err.message);
   }
 
-   if (carouselCards.length > 0) {
-      await sendMediaCarouselURL(to,
-        "ai_design_carousel_", // your approved template
-        "en_US",
-        [],
-        carouselCards
-      );
-      console.log("✅ Sent final media carousel with all AI designs!");
-    }
+//    if (carouselCards.length > 0) {
+//      await sendInteractiveMediaCarouselWithCards(
+//   to,
+//   "AI Designs",
+//   "Choose your design",
+//   carouselCards
+// );
+//       console.log("✅ Sent final media carousel with all AI designs!");
+//     }
 }
   } catch (err) {
     await sendTypingIndicator(to, msgId, false);
@@ -643,87 +648,140 @@ async function uploadToExternalAPI(buffer, filename, mimeType) {
 }
 
 
+// ✅ Media-Card Carousel Template Sender
+// ✅ Send Interactive Carousel with Images & Titles/Descriptions
+// async function sendInteractiveMediaCarouselWithCards(to, carouselTitle, bodyText, cardsData) {
+//   console.log("📤 Sending interactive media carousel with cards to:", to);
+
+//   try {
+//     // Map carouselCards to WhatsApp interactive rows
+//     const rows = cardsData.map((card, idx) => ({
+//       id: card.id || `design_${idx + 1}`,
+//       title: card.title?.slice(0, 24) || `Design ${idx + 1}`, // max 24 chars
+//       description: card.description?.slice(0, 72) || "",
+//       image: card.headerAssetId ? { id: card.headerAssetId } : undefined
+//       // Note: URL buttons can't be directly added per row; handle clicks via webhook
+//     }));
+
+//     const payload = {
+//       messaging_product: "whatsapp",
+//       to,
+//       type: "interactive",
+//       interactive: {
+//         type: "carousel",
+//         header: { type: "text", text: carouselTitle },
+//         body: { text: bodyText },
+//         action: {
+//           sections: [
+//             {
+//               title: "Designs",
+//               rows
+//             }
+//           ]
+//         }
+//       }
+//     };
+
+//     const response = await axios.post(
+//       `https://graph.facebook.com/v24.0/${PHONE_NUMBER_ID}/messages`,
+//       payload,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${ACCESS_TOKEN}`,
+//           "Content-Type": "application/json"
+//         }
+//       }
+//     );
+
+//     console.log("✅ Interactive media carousel with cards sent:", response.data);
+//     return response.data;
+
+//   } catch (err) {
+//     console.error("❌ Error sending interactive media carousel with cards:", err.response?.data || err.message);
+//   }
+// }
+
 
 // ✅ Media-Card Carousel Template Sender (URL Buttons Only)
-async function sendMediaCarouselURL(to, templateName, languageCode, bodyVariables, cardsData) {
-  console.log("📤 Sending Media Carousel with URL buttons to:", to);
+// async function sendMediaCarouselURL(to, templateName, languageCode, bodyVariables, cardsData) {
+//   console.log("📤 Sending Media Carousel with URL buttons to:", to);
 
-  try {
-    // Construct body component
-    const components = [
-      {
-        type: "body",
-        parameters: bodyVariables.map(text => ({
-          type: "text",
-          text
-        }))
-      },
-      {
-        type: "carousel",
-        cards: cardsData.map((card, idx) => ({
-          card_index: idx,
-          components: [
-            // Header: image or video
-            {
-              type: "header",
-              parameters: [
-                {
-                  type: card.headerFormat,
-                  [card.headerFormat]: { id: card.headerAssetId }
-                }
-              ]
-            },
-            // Optional card body text
-            ...(card.bodyText
-              ? [{
-                  type: "body",
-                  parameters: [{ type: "text", text: card.bodyText }]
-                }]
-              : []),
-            // URL Button (only)
-            ...(card.urlButtonUrl && card.urlButtonText
-              ? [{
-                  type: "button",
-                  sub_type: "url",
-                  index: "0",
-                  parameters: [{ type: "text", text: card.urlButtonUrl }]
-                }]
-              : [])
-          ]
-        }))
-      }
-    ];
+//   try {
+//     // Construct body component
+//     const components = [
+//       {
+//         type: "body",
+//         parameters: bodyVariables.map(text => ({
+//           type: "text",
+//           text
+//         }))
+//       },
+//       {
+//         type: "carousel",
+//         cards: cardsData.map((card, idx) => ({
+//           card_index: idx,
+//           components: [
+//             // Header: image or video
+//             {
+//               type: "header",
+//               parameters: [
+//                 {
+//                   type: card.headerFormat,
+//                   [card.headerFormat]: { id: card.headerAssetId }
+//                 }
+//               ]
+//             },
+//             // Optional card body text
+//             ...(card.bodyText
+//               ? [{
+//                   type: "body",
+//                   parameters: [{ type: "text", text: card.bodyText }]
+//                 }]
+//               : []),
+//             // URL Button (only)
+//             ...(card.urlButtonUrl && card.urlButtonText
+//               ? [{
+//                   type: "button",
+//                   sub_type: "url",
+//                   index: "0",
+//                   parameters: [{ type: "text", text: card.urlButtonUrl }]
+//                 }]
+//               : [])
+//           ]
+//         }))
+//       }
+//     ];
 
-    const payload = {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "template",
-      template: {
-        name: templateName,
-        language: { code: languageCode },
-        components
-      }
-    };
+//     const payload = {
+//       messaging_product: "whatsapp",
+//       recipient_type: "individual",
+//       to,
+//       type: "template",
+//       template: {
+//         name: templateName,
+//         language: { code: languageCode },
+//         components
+//       }
+//     };
 
-    const response = await axios.post(
-      `https://graph.facebook.com/v24.0/${PHONE_NUMBER_ID}/messages`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${ACCESS_TOKEN}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
+//     const response = await axios.post(
+//       `https://graph.facebook.com/v24.0/${PHONE_NUMBER_ID}/messages`,
+//       payload,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${ACCESS_TOKEN}`,
+//           "Content-Type": "application/json"
+//         }
+//       }
+//     );
 
-    console.log("✅ Media Carousel with URL buttons sent:", response.data);
-    return response.data;
+//     console.log("✅ Media Carousel with URL buttons sent:", response.data);
+//     return response.data;
 
-  } catch (err) {
-    console.error("❌ Error sending Media Carousel with URL buttons:", err.response?.data || err.message);
-  }
-}
+//   } catch (err) {
+//     console.error("❌ Error sending Media Carousel with URL buttons:", err.response?.data || err.message);
+//   }
+// }
 
 
 
@@ -745,6 +803,11 @@ async function sendTextMessage(to, message) {
     }
   );
 }
+
+// ✅ Basic root endpoint
+app.get('/', (req, res)=>{
+    res.send("Welcome to AI Session Gateway!")
+})
 
 
 app.listen(process.env.PORT, () => {
